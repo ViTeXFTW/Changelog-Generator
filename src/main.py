@@ -1,8 +1,9 @@
 from github import PullRequest, Commit
 import argparse
+from loguru import logger
 import re
 from datetime import datetime
-from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, authenticate
+from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, MAX_COMMIT_HEADER_LENGTH, authenticate
 
 # Meta information
 CHANGELOG_FILE = "CHANGELOG.md"
@@ -41,17 +42,17 @@ def get_latest_release() -> dict:
             if line.startswith("##"):
                 parsed = parse_release_line(line)
                 if parsed:
-                    print(f"Found version {parsed['version']} with date {parsed['release_date']} in changelog.")
+                    logger.info(f"Found version {parsed['version']} with date {parsed['release_date']} in changelog.")
                     return {"latest_version": parsed["version"], "latest_release_date": parsed["release_date"]}
                 else:
                     # Fallback if format doesn't match: use the header as version and minimal date.
                     version = line.replace("##", "").strip()
-                    print(f"Found version {version} in changelog without date format.")
+                    logger.warning(f"Found version {version} in changelog without date format.")
                     return {"latest_version": version, "latest_release_date": datetime.min}
-        print("No release version found in changelog.")
+        logger.warning("No release version found in changelog.")
         return None
     except Exception as e:
-        print(f"Changelog file not found or unreadable: {e}")
+        logger.warning(f"Changelog file not found or unreadable: {e}")
         return None
 
 
@@ -59,11 +60,12 @@ def get_commits_since(release_date: datetime) -> list[Commit.Commit]:
     commits: list[Commit.Commit] = []
     try:
         for commit in repository.get_commits(since=release_date, sha=RELEASE_BRANCH):
+            logger.info(f"Commit: {commit.commit.message}")
             if not commit.commit.message.startswith("Merge"):
                 commits.append(commit)
-        print(f"Found {len(commits)} commits since last release.")
+        logger.info(f"Found {len(commits)} commits since last release.")
     except:
-        print("Failed to retrieve commits.")
+        logger.warning("Failed to retrieve commits.")
     return commits
 
 def get_merged_prs(release_date: datetime) -> list[PullRequest.PullRequest]:
@@ -72,9 +74,10 @@ def get_merged_prs(release_date: datetime) -> list[PullRequest.PullRequest]:
     for pr in pulls:
         if pr.merged_at and pr.merged_at > release_date:
             # PaginatedList of pull request
+            logger.info(f"PR: {pr.title}")
             merged_prs.append(pr)
-            
-    print(f"Found {len(merged_prs)} merged PRs since last release.")
+    
+    logger.info(f"Found {len(merged_prs)} merged PRs since last release.")
     return merged_prs
 
 def calculate_new_version(current_version: str, items: list) -> str:
@@ -103,7 +106,7 @@ def calculate_new_version(current_version: str, items: list) -> str:
         else:
             major_num, minor_num, patch_num = 0, 0, 0
     except:
-        print("Invalid version format.")
+        logger.warning("Invalid version format.")
         return None
     
     if major_bump:
@@ -115,7 +118,7 @@ def calculate_new_version(current_version: str, items: list) -> str:
     else:
         return current_version
     
-def update_changelog(new_entry: str) -> str:
+def update_changelog(new_entry: str, dry_run = False) -> str:
     try:
         current_content = repository.get_contents(CHANGELOG_FILE, ref=RELEASE_BRANCH)
         decoded = current_content.decoded_content.decode("utf-8")
@@ -134,20 +137,28 @@ def update_changelog(new_entry: str) -> str:
         updated_lines = lines[:insert_index] + [new_entry, ""] + lines[insert_index:]
         updated_content = "\n".join(updated_lines)
         
-        repository.update_file(current_content.path, COMMIT_MESSAGE, updated_content, current_content.sha, branch=RELEASE_BRANCH)
-        print("Changelog updated successfully.")
-        return updated_content
+        if dry_run:
+            logger.info("DRY RUN, FULL CHANGELOG: ")
+            logger.info(updated_content)
+        else:
+            repository.update_file(current_content.path, COMMIT_MESSAGE, updated_content, current_content.sha, branch=RELEASE_BRANCH)
+            logger.success("Changelog updated successfully.")
+            return updated_content
     except:
-        print("Failed to update the changelog.")
-        try:
-            print("Attempting to create a new file...")
-            content = CHANGELOG_INITIAL_CONTENT + "\n" + new_entry + "\n\n## Initial Release\n\n### Added\n\n- Initial release\n"
-            repository.create_file(CHANGELOG_FILE, COMMIT_MESSAGE, content, branch=RELEASE_BRANCH)
-            print("Changelog created successfully.")
-            return new_entry
-        except:
-            print("Failed to create the changelog.")
+        if dry_run:
+            logger.info("DRY RUN, COULD NOT UPDATE CHANGELOG.")
             return ""
+        else:
+            logger.warning("Failed to update the changelog.")
+            try:
+                logger.info("Attempting to create a new file...")
+                content = CHANGELOG_INITIAL_CONTENT + "\n" + new_entry + "\n\n## Initial Release\n\n### Added\n\n- Initial release\n"
+                repository.create_file(CHANGELOG_FILE, COMMIT_MESSAGE, content, branch=RELEASE_BRANCH)
+                logger.success("Changelog created successfully.")
+                return new_entry
+            except:
+                logger.warning("Failed to create the changelog.")
+                return ""
 
 def create_release(new_version: str) -> bool:
     try:
@@ -157,10 +168,10 @@ def create_release(new_version: str) -> bool:
             message="Release " + new_version,
             target_commitish=RELEASE_BRANCH
         )
-        print("Release created successfully.")
+        logger.success("Release created successfully.")
         return True
     except:
-        print("Cannot create the release.")
+        logger.warning("Cannot create the release.")
         return False
 
 # Begin the script
@@ -185,51 +196,82 @@ if __name__ == "__main__":
         help="Use commits to generate changelog"
     )
 
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        default=False,
+        help="Print verbose output"
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Run the script without making any changes"
+    )
+
     args = parser.parse_args()
 
+    if args.dry_run:
+        logger.info("DRY RUN. GOING IN DRY!")
+
     if not authenticate():
-        print("Authentication failed. Exiting...")
+        logger.error("Authentication failed. Exiting...")
         exit(0)
 
     release_info = get_latest_release()
     if not release_info:
-        print("No releases found. Exiting...")
+        logger.error("No releases found. Exiting...")
         exit(1)
         
     latest_version = release_info["latest_version"]
-    print("Latest version:", latest_version)
+    logger.info("Latest version: " + latest_version)
 
     items: list[PullRequest.PullRequest | Commit.Commit] = []
     if args.pr:
         merged_prs = get_merged_prs(release_info["latest_release_date"])
         items.extend(merged_prs)
         if not merged_prs:
-            print("No merged PRs found.")
+            logger.info("No merged PRs found.")
 
     if args.commit:
         commits = get_commits_since(release_info["latest_release_date"])
         items.extend(commits)
         if not commits:
-            print("No commits found.")
+            logger.info("No commits found.")
 
 
     new_version = calculate_new_version(latest_version, items)
     if not new_version:
-        print("Invalid version format. Exiting...")
+        logger.error("Invalid version format. Exiting...")
         exit(3)
         
-    print("New version:", new_version)
+    logger.info("New version: " + new_version)
 
     changelog_entry = f"## {new_version} ({datetime.now().strftime('%Y-%m-%d')})\n"
     for pr in merged_prs:
         changelog_entry += f"- {pr.title} (#{pr.number})\n"
+
+    for commit in commits:
+        # Add commit message to changelog, unless it is longer than 100 chars
+
+        commit_title = commit.commit.message.splitlines()[0]
+
+        if len(commit_title) > MAX_COMMIT_HEADER_LENGTH:
+            commit_title = commit_title[:MAX_COMMIT_HEADER_LENGTH] + "..."
         
-    print("Changelog entry generated:\n", changelog_entry)
+        changelog_entry += f"- {commit_title} ({commit.sha[:7]})\n"
+        
+    logger.info("Changelog entry generated:\n" + changelog_entry)
+
+    if args.dry_run:
+        logger.success("Dry run completed.")
+        exit(0)
 
     if not update_changelog(changelog_entry):
-        print("Failed to update the changelog.")
+        logger.error("Failed to update the changelog.")
         exit(4)
 
     create_release(new_version)
 
-    print("Done.")
+    logger.success("Done.")
