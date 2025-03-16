@@ -24,5 +24,5 @@ jobs:
 
       - name: Run changelog generator
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python src/main.py
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python src/main.py -c -p
