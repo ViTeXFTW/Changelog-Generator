@@ -8,7 +8,7 @@ from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, MAX_COMMIT_HEAD
 
 # Meta information
 CHANGELOG_FILE = "CHANGELOG.md"
-COMMIT_MESSAGE = "chore(changelog): update changelog and create release"
+COMMIT_MESSAGE = "chore(changelog): update changelog and create release [skip ci]"
 
 ghub, repository = authenticate()
 
