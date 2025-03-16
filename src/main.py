@@ -1,4 +1,4 @@
-from github import PullRequest, Commit
+from github import PullRequest, Commit, InputGitAuthor
 import argparse
 from loguru import logger
 import sys
@@ -61,8 +61,9 @@ def get_commits_since(release_date: datetime) -> list[Commit.Commit]:
     commits: list[Commit.Commit] = []
     try:
         for commit in repository.get_commits(since=release_date, sha=RELEASE_BRANCH):
-            logger.debug(f"Commit: {commit.commit.message}")
+            
             if any(type in commit.commit.message.lower() for type in SEMANTIC_VERSIONING_TYPES):
+                logger.debug(f"Commit: {commit.commit.message[:MAX_COMMIT_HEADER_LENGTH]}")
                 commits.append(commit)
         logger.info(f"Found {len(commits)} commits since last release.")
     except:
@@ -75,7 +76,7 @@ def get_merged_prs(release_date: datetime) -> list[PullRequest.PullRequest]:
     for pr in pulls:
         if pr.merged_at and pr.merged_at > release_date:
             # PaginatedList of pull request
-            logger.info(f"PR: {pr.title}")
+            logger.info(f"PR: {pr.title[:MAX_COMMIT_HEADER_LENGTH]}")
             merged_prs.append(pr)
     
     logger.info(f"Found {len(merged_prs)} merged PRs since last release.")
@@ -148,7 +149,7 @@ def update_changelog(new_entry: str, dry_run = False) -> str:
                 updated_content,
                 current_content.sha,
                 branch=RELEASE_BRANCH,
-                author=CI_AUTHOR
+                author=InputGitAuthor(CI_AUTHOR["name"], CI_AUTHOR["email"])
                 )
             logger.success("Changelog updated successfully.")
             return updated_content
@@ -165,7 +166,7 @@ def update_changelog(new_entry: str, dry_run = False) -> str:
                                        COMMIT_MESSAGE,
                                        content,
                                        branch=RELEASE_BRANCH,
-                                       author=CI_AUTHOR
+                                       author=InputGitAuthor(CI_AUTHOR["name"], CI_AUTHOR["email"])
                                        )
                 logger.success("Changelog created successfully.")
                 return new_entry
@@ -179,7 +180,7 @@ def create_release(new_version: str) -> bool:
             tag=new_version,
             name=new_version,
             message="Release " + new_version,
-            target_commitish=RELEASE_BRANCH
+            target_commitish=RELEASE_BRANCH,
         )
         logger.success("Release created successfully.")
         return True
