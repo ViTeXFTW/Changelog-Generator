@@ -1,8 +1,7 @@
-from github import Github, Repository, PullRequest, ContentFile
-import os
+from github import PullRequest, Commit
+import argparse
 import re
 from datetime import datetime
-from dotenv import load_dotenv
 from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, authenticate
 
 # Meta information
@@ -55,7 +54,18 @@ def get_latest_release() -> dict:
         print(f"Changelog file not found or unreadable: {e}")
         return None
 
-    
+
+def get_commits_since(release_date: datetime) -> list[Commit.Commit]:
+    commits: list[Commit.Commit] = []
+    try:
+        for commit in repository.get_commits(since=release_date, sha=RELEASE_BRANCH):
+            if not commit.commit.message.startswith("Merge"):
+                commits.append(commit)
+        print(f"Found {len(commits)} commits since last release.")
+    except:
+        print("Failed to retrieve commits.")
+    return commits
+
 def get_merged_prs(release_date: datetime) -> list[PullRequest.PullRequest]:
     merged_prs: list[PullRequest.PullRequest] = []
     pulls = repository.get_pulls(state="closed", base=RELEASE_BRANCH)
@@ -67,13 +77,19 @@ def get_merged_prs(release_date: datetime) -> list[PullRequest.PullRequest]:
     print(f"Found {len(merged_prs)} merged PRs since last release.")
     return merged_prs
 
-def calculate_new_version(current_version: str, merged_prs: list[PullRequest.PullRequest]) -> str:
+def calculate_new_version(current_version: str, items: list) -> str:
     major_bump = False
     minor_bump = False
     patch_bump = False
-    
-    for pr in merged_prs:
-        content = (pr.title + "\n" + (pr.body or "")).lower()
+
+    for item in items:
+        if isinstance(item, PullRequest.PullRequest):
+            content = (item.title + "\n" + (item.body or "")).lower()
+        elif isinstance(item, Commit.Commit):
+            content = item.commit.message.lower()
+        else:
+            continue
+
         if "breaking change" in content:
             major_bump = True
         elif "feat" in content or "feature" in content:
@@ -82,7 +98,10 @@ def calculate_new_version(current_version: str, merged_prs: list[PullRequest.Pul
             patch_bump = True
             
     try:
-        major_num, minor_num, patch_num = map(int, current_version.strip("v").split("."))
+        if current_version.startswith("v"):
+            major_num, minor_num, patch_num = map(int, current_version.strip("v").split("."))
+        else:
+            major_num, minor_num, patch_num = 0, 0, 0
     except:
         print("Invalid version format.")
         return None
@@ -147,6 +166,27 @@ def create_release(new_version: str) -> bool:
 # Begin the script
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        description="Generate changelog using merged PRs or commits or both"
+    )
+    
+    parser.add_argument(
+        "-p", "--pr",
+        action="store_true",
+        default=True,
+        help="Use merged PRs to generate changelog"
+    )
+
+    parser.add_argument(
+        "-c", "--commit",
+        action="store_true",
+        default=False,
+        help="Use commits to generate changelog"
+    )
+
+    args = parser.parse_args()
+
     if not authenticate():
         print("Authentication failed. Exiting...")
         exit(0)
@@ -159,12 +199,21 @@ if __name__ == "__main__":
     latest_version = release_info["latest_version"]
     print("Latest version:", latest_version)
 
-    merged_prs = get_merged_prs(release_info["latest_release_date"])
-    if not merged_prs:
-        print("No merged PRs found. Exiting...")
-        exit(0)
-        
-    new_version = calculate_new_version(latest_version, merged_prs)
+    items: list[PullRequest.PullRequest | Commit.Commit] = []
+    if args.pr:
+        merged_prs = get_merged_prs(release_info["latest_release_date"])
+        items.extend(merged_prs)
+        if not merged_prs:
+            print("No merged PRs found.")
+
+    if args.commit:
+        commits = get_commits_since(release_info["latest_release_date"])
+        items.extend(commits)
+        if not commits:
+            print("No commits found.")
+
+
+    new_version = calculate_new_version(latest_version, items)
     if not new_version:
         print("Invalid version format. Exiting...")
         exit(3)
