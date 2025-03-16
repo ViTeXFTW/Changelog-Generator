@@ -14,6 +14,8 @@ CHANGELOG_INITIAL_CONTENT = "# Changelog\n\nAll notable changes to this project 
 
 MAX_COMMIT_HEADER_LENGTH = 100
 
+SEMANTIC_VERSIONING_TYPES = ["breaking change", "feat", "feature", "fix"]
+
 def authenticate() -> tuple[Github, Repository.Repository]:
     """
     Authenticate with the GitHub API.

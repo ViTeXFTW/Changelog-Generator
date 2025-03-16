@@ -1,9 +1,10 @@
 from github import PullRequest, Commit
 import argparse
 from loguru import logger
+import sys
 import re
 from datetime import datetime
-from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, MAX_COMMIT_HEADER_LENGTH, authenticate
+from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, MAX_COMMIT_HEADER_LENGTH, SEMANTIC_VERSIONING_TYPES, authenticate
 
 # Meta information
 CHANGELOG_FILE = "CHANGELOG.md"
@@ -42,7 +43,7 @@ def get_latest_release() -> dict:
             if line.startswith("##"):
                 parsed = parse_release_line(line)
                 if parsed:
-                    logger.info(f"Found version {parsed['version']} with date {parsed['release_date']} in changelog.")
+                    logger.debug(f"Found version {parsed['version']} with date {parsed['release_date']} in changelog.")
                     return {"latest_version": parsed["version"], "latest_release_date": parsed["release_date"]}
                 else:
                     # Fallback if format doesn't match: use the header as version and minimal date.
@@ -60,8 +61,8 @@ def get_commits_since(release_date: datetime) -> list[Commit.Commit]:
     commits: list[Commit.Commit] = []
     try:
         for commit in repository.get_commits(since=release_date, sha=RELEASE_BRANCH):
-            logger.info(f"Commit: {commit.commit.message}")
-            if not commit.commit.message.startswith("Merge"):
+            logger.debug(f"Commit: {commit.commit.message}")
+            if any(type in commit.commit.message.lower() for type in SEMANTIC_VERSIONING_TYPES):
                 commits.append(commit)
         logger.info(f"Found {len(commits)} commits since last release.")
     except:
@@ -197,20 +198,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        default=False,
-        help="Print verbose output"
-    )
-
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
         help="Run the script without making any changes"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args()  
 
     if args.dry_run:
         logger.info("DRY RUN. GOING IN DRY!")
