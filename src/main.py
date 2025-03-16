@@ -4,7 +4,7 @@ from loguru import logger
 import sys
 import re
 from datetime import datetime
-from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, MAX_COMMIT_HEADER_LENGTH, SEMANTIC_VERSIONING_TYPES, authenticate
+from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, MAX_COMMIT_HEADER_LENGTH, SEMANTIC_VERSIONING_TYPES, CI_AUTHOR, authenticate
 
 # Meta information
 CHANGELOG_FILE = "CHANGELOG.md"
@@ -142,7 +142,14 @@ def update_changelog(new_entry: str, dry_run = False) -> str:
             logger.info("DRY RUN, FULL CHANGELOG: ")
             logger.info(updated_content)
         else:
-            repository.update_file(current_content.path, COMMIT_MESSAGE, updated_content, current_content.sha, branch=RELEASE_BRANCH)
+            repository.update_file(
+                current_content.path,
+                COMMIT_MESSAGE,
+                updated_content,
+                current_content.sha,
+                branch=RELEASE_BRANCH,
+                author=CI_AUTHOR
+                )
             logger.success("Changelog updated successfully.")
             return updated_content
     except:
@@ -154,7 +161,12 @@ def update_changelog(new_entry: str, dry_run = False) -> str:
             try:
                 logger.info("Attempting to create a new file...")
                 content = CHANGELOG_INITIAL_CONTENT + "\n" + new_entry + "\n\n## Initial Release\n\n### Added\n\n- Initial release\n"
-                repository.create_file(CHANGELOG_FILE, COMMIT_MESSAGE, content, branch=RELEASE_BRANCH)
+                repository.create_file(CHANGELOG_FILE,
+                                       COMMIT_MESSAGE,
+                                       content,
+                                       branch=RELEASE_BRANCH,
+                                       author=CI_AUTHOR
+                                       )
                 logger.success("Changelog created successfully.")
                 return new_entry
             except:
@@ -193,8 +205,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--commit",
         action="store_true",
-        default=False,
+        default=True,
         help="Use commits to generate changelog"
+    )
+
+    parser.add_argument(
+        "-r", "--release",
+        action="store_true",
+        default=True,
+        help="Create a new release"
     )
 
     parser.add_argument(
@@ -266,6 +285,7 @@ if __name__ == "__main__":
         logger.error("Failed to update the changelog.")
         exit(4)
 
-    create_release(new_version)
+    if args.release:
+        create_release(new_version)
 
     logger.success("Done.")
