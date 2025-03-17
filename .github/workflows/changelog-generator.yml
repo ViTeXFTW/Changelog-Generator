@@ -64,13 +64,12 @@ jobs:
       - name: Run changelog generator
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: python src/main.py \
-             --branch "${{ github.event.inputs.branch }}" \
-             --file-name "${{ github.event.inputs.file_name }}" \
-             $( [ "${{ github.event.inputs.use_pull_requests }}" = "true" ] && echo "--use-pull-requests" ) \
-             $( [ "${{ github.event.inputs.use_commits }}" = "true" ] && echo "--use-commits" ) \
-             --insert-position "${{ github.event.inputs.insert_position }}" \
-             --commit-message "${{ github.event.inputs.commit_message }}" \
-             $( [ "${{ github.event.inputs.release }}" = "true" ] && echo "--release" ) \
-             $( [ "${{ github.event.inputs.draft }}" = "true" ] && echo "--draft" ) \
-             $( [ "${{ github.event.inputs.prerelease }}" = "true" ] && echo "--prerelease" )
+        run: |
+          args="--branch '${{ github.event.inputs.branch }}' --file-name '${{ github.event.inputs.file_name }}' --insert-position '${{ github.event.inputs.insert_position }}' --commit-message '${{ github.event.inputs.commit_message }}'"
+          [ "${{ github.event.inputs.use_pull_requests }}" = "true" ] && args="$args --use-pull-requests"
+          [ "${{ github.event.inputs.use_commits }}" = "true" ] && args="$args --use-commits"
+          [ "${{ github.event.inputs.release }}" = "true" ] && args="$args --release"
+          [ "${{ github.event.inputs.draft }}" = "true" ] && args="$args --draft"
+          [ "${{ github.event.inputs.prerelease }}" = "true" ] && args="$args --prerelease"
+          echo "Running: python src/main.py $args"
+          python src/main.py $args
