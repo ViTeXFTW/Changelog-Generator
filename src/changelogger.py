@@ -32,6 +32,10 @@ class Changelogger:
         "email": "github-actions[bot]@users.noreply.github.com"
     }
 
+    def _new_changelog_text(self, datetime: datetime) -> str:
+        msg = f"# Changelog\n\n## [initial release] - ({datetime.strftime('%Y-%m-%d %H:%M:%S')})\n\n- Initial release\n"
+        return msg
+
     class ChangelogEntryType:
         BREAKING_CHANGE = "breaking change"
         FEATURE = ["feature", "feat"]
@@ -51,7 +55,7 @@ class Changelogger:
                         types.append(value)
             return types
 
-    changelog_regex = re.compile(r'##\s*(v\d+\.\d+\.\d+)\s*-\s*\((\d{4}-\d{2}-\d{2})\)')
+    changelog_regex = re.compile(r'##\s*(v\d+\.\d+\.\d+)\s*-\s*\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\)')
     
 
     def __init__(self,
@@ -97,7 +101,7 @@ class Changelogger:
         logger.remove()
         logger.add(sys.stderr, level="INFO")
 
-    def _get_previous_release_info(self, changelog: str) -> tuple[str, str]:
+    def _get_previous_release_info(self, changelog: str) -> tuple[str, datetime]:
         """
         Use the in repository changelog to get the latest release.
         Looks for '##' in the changelog, parse through regex to get the version and date.
@@ -117,7 +121,7 @@ class Changelogger:
                     match = self.changelog_regex.match(line)
                     if match:
                         logger.info(f"Found existing release: {match.group(1)} - {match.group(2)}")
-                        return match.group(1), datetime.strptime(match.group(2), "%Y-%m-%d").strftime("%Y-%m-%d")
+                        match.group(1), datetime.strptime(match.group(2), "%Y-%m-%d %H:%M:%S")
             
             logger.warning("No existing release found, checking for initial release date")
 
@@ -125,13 +129,13 @@ class Changelogger:
             for line in header_lines:
                 if "initial release" in line.lower():
                     logger.info(f"Found initial release: {line}")
-                    match = re.search(r'\(?(\d{4}-\d{2}-\d{2})\)?', line)
+                    match = re.search(r'\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\)', line)
                     if match:
                         logger.info(f"Date found from initial release: {match.group(1)}")
-                        return "v0.0.0", datetime.strptime(match.group(1), "%Y-%m-%d").strftime("%Y-%m-%d")
+                        "v0.0.0", datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
 
             logger.warning("No initial release found, using current date")
-            return "v0.0.0", datetime.now().strftime("%Y-%m-%d")
+            return None, None
         except Exception as e:
             logger.error(f"Error parsing changelog: {e}")
             return None, None
@@ -139,7 +143,7 @@ class Changelogger:
 
 
     
-    def _get_commits(self, since: str, until: str = None) -> list[Commit.Commit]:
+    def _get_commits(self, since: datetime, until: datetime = None) -> list[Commit.Commit]:
         """
         Get all commits between two dates.
         
@@ -151,10 +155,7 @@ class Changelogger:
 
         # If no until date is provided, use the current date
         if not until:
-            until = datetime.now().strftime("%Y-%m-%d")
-
-        since = datetime.strptime(since, "%Y-%m-%d")
-        until = datetime.strptime(until, "%Y-%m-%d")
+            until = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Get commits that contains entries in ChangelogEntryType
         try:
@@ -179,7 +180,7 @@ class Changelogger:
 
 
 
-    def _get_pull_requests(self, since: str, until: str = "") -> list[PullRequest.PullRequest]:
+    def _get_pull_requests(self, since: datetime, until: datetime = "") -> list[PullRequest.PullRequest]:
         """
         Get all pull requests between two dates.
         
@@ -191,20 +192,21 @@ class Changelogger:
 
         # If no until date is provided, use the current date
         if not until:
-            until = datetime.now().strftime("%Y-%m-%d")
+            until = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Get pull requests that contains entries in ChangelogEntryType
         try:
-            prs = self.__repository.get_pulls(state="closed",
+            prs = self.__repository.get_pulls(state="merged",
                                               sort="updated",
                                               direction="desc",
                                               base=self.__ref)
             
             for pr in prs:
-                for type in self.ChangelogEntryType:
-                    if type in pr.title.lower():
-                        logger.debug(f"Found PR: {pr.title[:self.MAX_DEBUG_LENGTH]}")
-                        found_prs.append(pr)
+                if pr.merged_at < since or pr.merged_at > until:
+                    for type in self.ChangelogEntryType:
+                        if type in pr.title.lower():
+                            logger.debug(f"Found PR: {pr.title[:self.MAX_DEBUG_LENGTH]}")
+                            found_prs.append(pr)
             
             logger.info(f"Found {len(found_prs)} pull requests")        
 
@@ -263,7 +265,7 @@ class Changelogger:
         
         return f"v{major}.{minor}.{patch}"
 
-    def _create_new_entry(self, new_version: str, additions: list[PullRequest.PullRequest | Commit.Commit], custom_date: str = None) -> str:
+    def _create_new_entry(self, new_version: str, additions: list[PullRequest.PullRequest | Commit.Commit], custom_date: datetime = None) -> str:
         """
         Create a new entry for the changelog.
         
@@ -274,7 +276,7 @@ class Changelogger:
         """
         
         if not custom_date:
-            custom_date = datetime.now().strftime("%Y-%m-%d")
+            custom_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         entry_lines = [f"## {new_version} - ({custom_date})"]
 
@@ -375,6 +377,26 @@ class Changelogger:
             return False
 
 
+    def _create_changelog_file(self, repository: Repository.Repository) -> bool:
+        """
+        Create a new changelog file in the repository.
+        
+        :param repository: The repository to create the changelog file in
+        :return: True if successful, False otherwise
+        """
+        try:
+            repository.create_file(self.__filename_changelog,
+                                   self.__commit_message,
+                                   self._new_changelog_text(datetime.now()),
+                                   branch=self.__ref,
+                                   author=self.__ci_author,
+                                   committer=self.__ci_author)
+            logger.success("Changelog file created")
+            return True
+        except Exception as e:
+            logger.error(f"Error creating changelog file: {e}")
+            return False
+
     def create_new_changelog_entry(self) -> bool:
         """
         Create new changelog entry, update changelog and publish to repository.
@@ -384,17 +406,29 @@ class Changelogger:
         """
         
         # Get remote changelog file
-        changelog_content = self.__repository.get_contents(self.__filename_changelog)
-        
+        changelog_content = self.__repository.get_contents(self.__filename_changelog, ref=self.__ref)
+
         if not changelog_content:
-            logger.error("Error getting changelog file, has it been pushed?")
-            return False
+            logger.warning("Changelog file not found, creating new file")
+            if not self.__dry_run:
+                if not self._create_changelog_file(self.__repository):
+                    return False
+            else:
+                logger.success("Dry run enabled, skipping file creation")
+                return True
         
         changelog = changelog_content.decoded_content.decode("utf-8")
         changelog_sha = changelog_content.sha
+
+        logger.debug(f"Repo: {self.__repository.full_name}, Branch: {self.__ref}, Changelog: {self.__filename_changelog}, SHA: {changelog_sha}")
+        logger.debug(f"Changelog content: {changelog}")
         
         previous_version, previous_date = self._get_previous_release_info(changelog)
         
+        if previous_version is None:
+            logger.error("Error getting previous release info")
+            return False
+
         # Get the commits and pull requests
         if self.__use_commits:
             commits = self._get_commits(previous_date)
