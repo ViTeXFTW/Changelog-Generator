@@ -3,10 +3,52 @@ name: Changelog Generation
 on:
   workflow_dispatch:
     inputs:
-      arguments:
-        description: 'Arguments for the script'
+      branch:
+        description: "The branch to generate the changelog from."
         required: false
-        default: ''
+        default: "main"
+      file_name:
+        description: "The name of the changelog file."
+        required: false
+        default: "CHANGELOG.md"
+      use_pull_requests:
+        description: "Use pull requests to generate the changelog."
+        required: false
+        default: "true"
+      use_commits:
+        description: "Use commit messages to generate the changelog."
+        required: false
+        default: "true"
+      verbose:
+        description: "Enable verbose output."
+        required: false
+        default: "false"
+      insert_position:
+        description: "The position to insert the changelog entry."
+        required: false
+        type: choice
+        default: "above_previous"
+        options:
+          - above_previous
+          - below_previous
+          - top
+          - bottom
+      commit_message:
+        description: "The commit message to use when updating the changelog."
+        required: false
+        default: "chore(changelog): update changelog and create release [skip ci]"
+      release:
+        description: "Generate a release changelog."
+        required: false
+        default: "false"
+      draft:
+        description: "Mark release as draft. Requires release to be true."
+        required: false
+        default: "false"
+      prerelease:
+        description: "Mark release as prerelease. Requires release to be true."
+        required: false
+        default: "false"
 
 jobs:
   build:
@@ -29,4 +71,14 @@ jobs:
       - name: Run changelog generator
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: python src/main.py ${{ github.event.inputs.arguments }}
+        run: python src/main.py \
+             --branch "${{ github.event.inputs.branch }}" \
+             --file-name "${{ github.event.inputs.file_name }}" \
+             $( [ "${{ github.event.inputs.use_pull_requests }}" = "true" ] && echo "--use-pull-requests" ) \
+             $( [ "${{ github.event.inputs.use_commits }}" = "true" ] && echo "--use-commits" ) \
+             $( [ "${{ github.event.inputs.verbose }}" = "true" ] && echo "--verbose" ) \
+             --insert-position "${{ github.event.inputs.insert_position }}" \
+             --commit-message "${{ github.event.inputs.commit_message }}" \
+             $( [ "${{ github.event.inputs.release }}" = "true" ] && echo "--release" ) \
+             $( [ "${{ github.event.inputs.draft }}" = "true" ] && echo "--draft" ) \
+             $( [ "${{ github.event.inputs.prerelease }}" = "true" ] && echo "--prerelease" )
