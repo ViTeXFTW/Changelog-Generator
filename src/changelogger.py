@@ -1,7 +1,7 @@
 from enum import Enum, auto
 from github import Repository, Commit, PullRequest, InputGitAuthor
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys, re
 
 
@@ -153,12 +153,12 @@ class Changelogger:
         """
         found_commits: list[Commit.Commit] = []
         if not until:
-            until = datetime.now().isoformat(timespec='seconds')
+            until = datetime.now()
 
         try:
             logger.debug(f"Getting commits between {since} and {until}")
             commits = self.__repository.get_commits(since=since, until=until, sha=self.__ref)
-            logger.debug(f"Found {len(commits)} commits")
+            logger.debug(f"Completed commit query")
             for commit in commits:
                 for type in self.ChangelogEntryType.all():
                     if type in commit.commit.message.lower():
@@ -167,6 +167,7 @@ class Changelogger:
             
             logger.info(f"Found {len(found_commits)} commits")
         except Exception as e:
+            logger.error(f"Error getting commits: {e}")
             if not found_commits:
                 logger.warning("No commits found")
             else:
@@ -268,7 +269,7 @@ class Changelogger:
         
         if not custom_date:
             custom_date = datetime.now().isoformat(timespec='seconds')
-        entry_lines = [f"## {new_version} - ({custom_date})"]
+        entry_lines = [f"## v{new_version} - ({custom_date})"]
 
         for item in additions:
             if isinstance(item, PullRequest.PullRequest):
