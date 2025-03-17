@@ -67,4 +67,8 @@ if __name__ == "__main__":
                                 args.commit_message,
                                 dry_run=args.dry_run)
     
-    changelogger.create_new_changelog_entry()
+    if changelogger.create_new_changelog_entry():
+        print("Changelog entry created.")
+    else:
+        print("Error, while trying to create new changelog entry.")
+        exit(1)
