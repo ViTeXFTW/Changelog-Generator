@@ -132,7 +132,7 @@ class Changelogger:
                     match = re.search(r'\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\)', line)
                     if match:
                         logger.info(f"Date found from initial release: {match.group(1)}")
-                        return "v0.0.0", datetime.fromisoformat(match.group(1))
+                        return "0.0.0", datetime.fromisoformat(match.group(1))
 
             logger.warning("No initial release found, using current date")
             return None, None
@@ -269,7 +269,7 @@ class Changelogger:
         
         if not custom_date:
             custom_date = datetime.now().isoformat(timespec='seconds')
-        entry_lines = [f"## v{new_version} - ({custom_date})"]
+        entry_lines = [f"## {new_version} - ({custom_date})"]
 
         for item in additions:
             if isinstance(item, PullRequest.PullRequest):
@@ -277,7 +277,7 @@ class Changelogger:
             elif isinstance(item, Commit.Commit):
                 entry_lines.append(f"- {item.commit.message.splitlines()[0]}")
 
-        return "\n".join(entry_lines)
+        return "\n".join(entry_lines) + "\n\n"
 
 
     def _create_updated_changelog(self, new_entry: str, changelog: str) -> str:
