@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.1 - (2025-03-17T14:59:08)
+- fix(temp): temp
+
+
 ## v0.1.0 - (2025-03-17T14:57:54)
 - fix(script): wrong version formatting
 - fix(script): datetime
