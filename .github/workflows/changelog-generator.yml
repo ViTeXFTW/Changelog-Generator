@@ -14,11 +14,13 @@ on:
       use_pull_requests:
         description: "Use pull requests to generate the changelog."
         required: false
-        default: "true"
+        type: boolean
+        default: true
       use_commits:
         description: "Use commit messages to generate the changelog."
         required: false
-        default: "true"
+        type: boolean
+        default: true
       insert_position:
         description: "The position to insert the changelog entry."
         required: false
@@ -29,22 +31,21 @@ on:
           - below_previous
           - top
           - bottom
-      commit_message:
-        description: "The commit message to use when updating the changelog."
-        required: false
-        default: "chore(changelog): update changelog and create release [skip ci]"
       release:
         description: "Generate a release changelog."
         required: false
-        default: "false"
+        type: boolean
+        default: false
       draft:
         description: "Mark release as draft. Requires release to be true."
         required: false
-        default: "false"
+        type: boolean
+        default: false
       prerelease:
         description: "Mark release as prerelease. Requires release to be true."
         required: false
-        default: "false"
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -64,12 +65,4 @@ jobs:
       - name: Run changelog generator
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          args="--branch '${{ github.event.inputs.branch }}' --file-name '${{ github.event.inputs.file_name }}' --insert-position '${{ github.event.inputs.insert_position }}' --commit-message '${{ github.event.inputs.commit_message }}'"
-          [ "${{ github.event.inputs.use_pull_requests }}" = "true" ] && args="$args --use-pull-requests"
-          [ "${{ github.event.inputs.use_commits }}" = "true" ] && args="$args --use-commits"
-          [ "${{ github.event.inputs.release }}" = "true" ] && args="$args --release"
-          [ "${{ github.event.inputs.draft }}" = "true" ] && args="$args --draft"
-          [ "${{ github.event.inputs.prerelease }}" = "true" ] && args="$args --prerelease"
-          echo "Running: python src/main.py $args"
-          python src/main.py $args
+        run: python src/main.py --repo ${{ github.repository}} -b ${{ github.event.inputs.branch }} --file-name ${{ github.event.inputs.file_name }} -pr ${{ github.event.inputs.use_pull_requests }} -c ${{ github.event.inputs.use_commits }} --insert-position ${{ github.event.inputs.insert_position }} -r ${{ github.event.inputs.release }} --draft ${{ github.event.inputs.draft }} --prerelease ${{ github.event.inputs.prerelease }}
