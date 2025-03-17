@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.1 - (2025-03-17T15:00:36)
+- breaking change: removed temp
+
+
 ## v0.1.1 - (2025-03-17T14:59:08)
 - fix(temp): temp
 
