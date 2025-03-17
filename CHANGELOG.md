@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 
+## v0.1.1 (2025-03-17)
+- fix(workflow): action takes parameters in action window (55ba200)
+
+
 ## v0.1.0 (2025-03-17)
 - fix(script): incorrect author configuration (7eee40d)
 - feat(workflow): GitHub actions identification and manual_dispatch (af368b2)
