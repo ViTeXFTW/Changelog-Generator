@@ -19,10 +19,6 @@ on:
         description: "Use commit messages to generate the changelog."
         required: false
         default: "true"
-      verbose:
-        description: "Enable verbose output."
-        required: false
-        default: "false"
       insert_position:
         description: "The position to insert the changelog entry."
         required: false
@@ -77,7 +73,6 @@ jobs:
              $( [ "${{ github.event.inputs.use_pull_requests }}" = "true" ] && echo "--use-pull-requests" ) \
              $( [ "${{ github.event.inputs.use_commits }}" = "true" ] && echo "--use-commits" ) \
              $( [ "${{ github.event.inputs.verbose }}" = "true" ] && echo "--verbose" ) \
-             --insert-position "${{ github.event.inputs.insert_position }}" \
              --commit-message "${{ github.event.inputs.commit_message }}" \
              $( [ "${{ github.event.inputs.release }}" = "true" ] && echo "--release" ) \
              $( [ "${{ github.event.inputs.draft }}" = "true" ] && echo "--draft" ) \
