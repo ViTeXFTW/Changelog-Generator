@@ -1,292 +1,68 @@
-from github import PullRequest, Commit, InputGitAuthor
+from changelogger import Changelogger
+from dotenv import load_dotenv
+from github import Github, Repository
 import argparse
-from loguru import logger
-import sys
-import re
-from datetime import datetime
-from constants import RELEASE_BRANCH, CHANGELOG_INITIAL_CONTENT, MAX_COMMIT_HEADER_LENGTH, SEMANTIC_VERSIONING_TYPES, CI_AUTHOR, authenticate
+import os
+from changelogger import ChangelogEntryPosition
 
-# Meta information
-CHANGELOG_FILE = "CHANGELOG.md"
-COMMIT_MESSAGE = "chore(changelog): update changelog and create release [skip ci]"
+# Load environment variables from a .env file
+load_dotenv()
+# Access the GitHub token from the environment
+GH_TOKEN = os.getenv("GH_TOKEN")
 
-ghub, repository = authenticate()
-
-def parse_release_line(line: str) -> dict:
+def authenticate() -> tuple[Github, Repository.Repository]:
     """
-    Parse a changelog release line to extract version and release date.
-    
-    :param line: A line from the changelog file.
-    :return: A dictionary with version and release_date, or None if parsing fails.
+    Authenticate with the GitHub API.
+
+    :param token: The GitHub token.
+    :return: A tuple containing the GitHub object and the repository object.
     """
-    match = re.match(r'##\s*(v[\d\.]+)\s*\((\d{4}-\d{2}-\d{2})\)$', line)
-    if match:
-        version = match.group(1)
-        date_str = match.group(2)
-        release_date = datetime.strptime(date_str, '%Y-%m-%d')
-        return {"version": version, "release_date": release_date}
-    return None
 
-def get_latest_release() -> dict:
-    """
-    Get the latest version information from the changelog file.
-    Looks for a header line in the format:
-      ## v1.2.3 (YYYY-MM-DD)
-    
-    :return: A dictionary with latest_version and latest_release_date.
-    """
+    global ghub, repository
     try:
-        current_content = repository.get_contents(CHANGELOG_FILE, ref=RELEASE_BRANCH)
-        decoded = current_content.decoded_content.decode("utf-8")
-        lines = decoded.splitlines()
-        for line in lines:
-            if line.startswith("##"):
-                parsed = parse_release_line(line)
-                if parsed:
-                    logger.debug(f"Found version {parsed['version']} with date {parsed['release_date']} in changelog.")
-                    return {"latest_version": parsed["version"], "latest_release_date": parsed["release_date"]}
-                else:
-                    # Fallback if format doesn't match: use the header as version and minimal date.
-                    version = line.replace("##", "").strip()
-                    logger.warning(f"Found version {version} in changelog without date format.")
-                    return {"latest_version": version, "latest_release_date": datetime.min}
-        logger.warning("No release version found in changelog.")
-        return None
-    except Exception as e:
-        logger.warning(f"Changelog file not found or unreadable: {e}")
-        return None
-
-
-def get_commits_since(release_date: datetime) -> list[Commit.Commit]:
-    commits: list[Commit.Commit] = []
-    try:
-        for commit in repository.get_commits(since=release_date, sha=RELEASE_BRANCH):
-            
-            if any(type in commit.commit.message.lower() for type in SEMANTIC_VERSIONING_TYPES):
-                logger.debug(f"Commit: {commit.commit.message[:MAX_COMMIT_HEADER_LENGTH]}")
-                commits.append(commit)
-        logger.info(f"Found {len(commits)} commits since last release.")
+        ghub = Github(os.getenv("GH_TOKEN"))
+        repository = ghub.get_repo(os.getenv("REPO_NAME"))
+        return ghub, repository
     except:
-        logger.warning("Failed to retrieve commits.")
-    return commits
-
-def get_merged_prs(release_date: datetime) -> list[PullRequest.PullRequest]:
-    merged_prs: list[PullRequest.PullRequest] = []
-    pulls = repository.get_pulls(state="closed", base=RELEASE_BRANCH)
-    for pr in pulls:
-        if pr.merged_at and pr.merged_at > release_date:
-            # PaginatedList of pull request
-            logger.info(f"PR: {pr.title[:MAX_COMMIT_HEADER_LENGTH]}")
-            merged_prs.append(pr)
-    
-    logger.info(f"Found {len(merged_prs)} merged PRs since last release.")
-    return merged_prs
-
-def calculate_new_version(current_version: str, items: list) -> str:
-    major_bump = False
-    minor_bump = False
-    patch_bump = False
-
-    for item in items:
-        if isinstance(item, PullRequest.PullRequest):
-            content = (item.title + "\n" + (item.body or "")).lower()
-        elif isinstance(item, Commit.Commit):
-            content = item.commit.message.lower()
-        else:
-            continue
-
-        if "breaking change" in content:
-            major_bump = True
-        elif "feat" in content or "feature" in content:
-            minor_bump = True
-        elif "fix" in content:
-            patch_bump = True
-            
-    try:
-        if current_version.startswith("v"):
-            major_num, minor_num, patch_num = map(int, current_version.strip("v").split("."))
-        else:
-            major_num, minor_num, patch_num = 0, 0, 0
-    except:
-        logger.warning("Invalid version format.")
-        return None
-    
-    if major_bump:
-        return f"v{major_num + 1}.0.0"
-    elif minor_bump:
-        return f"v{major_num}.{minor_num + 1}.0"
-    elif patch_bump:
-        return f"v{major_num}.{minor_num}.{patch_num + 1}"
-    else:
-        return current_version
-    
-def update_changelog(new_entry: str, dry_run = False) -> str:
-    try:
-        current_content = repository.get_contents(CHANGELOG_FILE, ref=RELEASE_BRANCH)
-        decoded = current_content.decoded_content.decode("utf-8")
-        # Split the existing changelog into lines
-        lines = decoded.splitlines()
-        # Find the index of the first release entry (lines starting with "##")
-        insert_index = 0
-        for i, line in enumerate(lines):
-            if line.startswith("##"):
-                insert_index = i
-                break
-        else:
-            insert_index = len(lines)
-        
-        # Insert new_entry just before the first release entry, maintaining header
-        updated_lines = lines[:insert_index] + [new_entry, ""] + lines[insert_index:]
-        updated_content = "\n".join(updated_lines)
-        
-        if dry_run:
-            logger.info("DRY RUN, FULL CHANGELOG: ")
-            logger.info(updated_content)
-        else:
-            repository.update_file(
-                current_content.path,
-                COMMIT_MESSAGE,
-                updated_content,
-                current_content.sha,
-                branch=RELEASE_BRANCH,
-                author=InputGitAuthor(CI_AUTHOR["name"], CI_AUTHOR["email"])
-                )
-            logger.success("Changelog updated successfully.")
-            return updated_content
-    except:
-        if dry_run:
-            logger.info("DRY RUN, COULD NOT UPDATE CHANGELOG.")
-            return ""
-        else:
-            logger.warning("Failed to update the changelog.")
-            try:
-                logger.info("Attempting to create a new file...")
-                content = CHANGELOG_INITIAL_CONTENT + "\n" + new_entry + "\n\n## Initial Release\n\n### Added\n\n- Initial release\n"
-                repository.create_file(CHANGELOG_FILE,
-                                       COMMIT_MESSAGE,
-                                       content,
-                                       branch=RELEASE_BRANCH,
-                                       author=InputGitAuthor(CI_AUTHOR["name"], CI_AUTHOR["email"])
-                                       )
-                logger.success("Changelog created successfully.")
-                return new_entry
-            except:
-                logger.warning("Failed to create the changelog.")
-                return ""
-
-def create_release(new_version: str) -> bool:
-    try:
-        repository.create_git_release(
-            tag=new_version,
-            name=new_version,
-            message="Release " + new_version,
-            target_commitish=RELEASE_BRANCH,
-        )
-        logger.success("Release created successfully.")
-        return True
-    except:
-        logger.warning("Cannot create the release.")
+        print("Authentication failed.")
         return False
 
-# Begin the script
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(
-        description="Generate changelog using merged PRs or commits or both"
-    )
+    parser = argparse.ArgumentParser(description="Generate a changelog for a GitHub repository.")
+
+    parser.add_argument("-b", "--branch", type=str, help="The branch to generate the changelog from.", default="main")
+    parser.add_argument('-f', "--file-name", type=str, help="The name of the changelog file.", default="CHANGELOG.md")
+    parser.add_argument("-pr", "--use-pull-requests", action="store_true", help="Use pull requests to generate the changelog.", default=True)
+    parser.add_argument("-c", "--use-commits", action="store_true", help="Use commit messages to generate the changelog.", default=True)
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output.", default=False)
+    parser.add_argument("--insert-position", type=str, help="The position to insert the changelog entry.", default="above_previous", choices=[position.value for position in ChangelogEntryPosition])
+    parser.add_argument("--commit-message", type=str, help="The commit message to use when updating the changelog.", default=Changelogger.COMMIT_MESSAGE)
+
+    parser.add_argument("-r", "--release", action="store_true", help="Generate a release changelog.", default=False)
+    parser.add_argument("--draft", action="store_true", help="Mark the release as a draft. Requires release is true", default=False)
+    parser.add_argument("--prerelease", action="store_true", help="Mark the release as a prerelease. Requires release is true", default=False)
+
+    parser.add_argument("--dry-run", action="store_true", help="Perform a dry run.", default=False)
+
+    args = parser.parse_args()
+
+    if not args.release and (args.draft or args.prerelease):
+        parser.error("--draft and --prerelease require --release to be set.")
+
+    ghub, repo = authenticate()
     
-    parser.add_argument(
-        "-p", "--pr",
-        action="store_true",
-        default=True,
-        help="Use merged PRs to generate changelog"
-    )
-
-    parser.add_argument(
-        "-c", "--commit",
-        action="store_true",
-        default=True,
-        help="Use commits to generate changelog"
-    )
-
-    parser.add_argument(
-        "-r", "--release",
-        action="store_true",
-        default=True,
-        help="Create a new release"
-    )
-
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=False,
-        help="Run the script without making any changes"
-    )
-
-    args = parser.parse_args()  
-
-    if args.dry_run:
-        logger.info("DRY RUN. GOING IN DRY!")
-
-    if not authenticate():
-        logger.error("Authentication failed. Exiting...")
-        exit(0)
-
-    release_info = get_latest_release()
-    if not release_info:
-        logger.error("No releases found. Exiting...")
-        exit(1)
-        
-    latest_version = release_info["latest_version"]
-    logger.info("Latest version: " + latest_version)
-
-    items: list[PullRequest.PullRequest | Commit.Commit] = []
-    if args.pr:
-        merged_prs = get_merged_prs(release_info["latest_release_date"])
-        items.extend(merged_prs)
-        if not merged_prs:
-            logger.info("No merged PRs found.")
-
-    if args.commit:
-        commits = get_commits_since(release_info["latest_release_date"])
-        items.extend(commits)
-        if not commits:
-            logger.info("No commits found.")
-
-
-    new_version = calculate_new_version(latest_version, items)
-    if not new_version:
-        logger.error("Invalid version format. Exiting...")
-        exit(3)
-        
-    logger.info("New version: " + new_version)
-
-    changelog_entry = f"## {new_version} ({datetime.now().strftime('%Y-%m-%d')})\n"
-    for pr in merged_prs:
-        changelog_entry += f"- {pr.title} (#{pr.number})\n"
-
-    for commit in commits:
-        # Add commit message to changelog, unless it is longer than 100 chars
-
-        commit_title = commit.commit.message.splitlines()[0]
-
-        if len(commit_title) > MAX_COMMIT_HEADER_LENGTH:
-            commit_title = commit_title[:MAX_COMMIT_HEADER_LENGTH] + "..."
-        
-        changelog_entry += f"- {commit_title} ({commit.sha[:7]})\n"
-        
-    logger.info("Changelog entry generated:\n" + changelog_entry)
-
-    if args.dry_run:
-        logger.success("Dry run completed.")
-        exit(0)
-
-    if not update_changelog(changelog_entry):
-        logger.error("Failed to update the changelog.")
-        exit(4)
-
-    if args.release:
-        create_release(new_version)
-
-    logger.success("Done.")
+    changelogger = Changelogger(repo,
+                                args.branch,
+                                args.file_name,
+                                args.use_pull_requests,
+                                args.use_commits,
+                                args.release,
+                                args.draft,
+                                args.prerelease,
+                                ChangelogEntryPosition(args.insert_position),
+                                args.commit_message,
+                                dry_run=args.dry_run)
+    
+    changelogger.create_new_changelog_entry()
